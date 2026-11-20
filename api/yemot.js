@@ -16,7 +16,7 @@ function val(url, names) {
 function esc(v) { return String(v ?? '').replace(/[<>]/g, ' '); }
 function number(v) { return Number(v).toLocaleString('he-IL'); }
 function menu() {
-  return 'ברוכים הבאים למרכז מידע עולם וחלל. לשיגורי חלל קרובים הקישו 1. לחיפוש לוויין הקישו 2. למידע על מדינה הקישו 3. לעובדה מעניינת על מספר הקישו 4. למידע על מעברי לוויינים הקישו 5.';
+  return 'ברוכים הבאים למרכז מידע עולם וחלל. לשיגורי חלל קרובים הקישו 1. לחיפוש לוויין הקישו 2. למידע על מדינה הקישו 3. לעובדה מעניינת על מספר הקישו 4. למידע על מעברי לוויינים הקישו 5. לרעידות אדמה בעולם הקישו 6. למיקום תחנת החלל הקישו 7. למעקב טיסות עולמי הקישו 8. לאוכלוסיית העולם הקישו 9.';
 }
 async function json(url) {
   const r = await fetch(url, { headers: { 'User-Agent': 'YemotWorldSpaceAPI/1.0' } });
@@ -48,6 +48,42 @@ async function country(code) {
   const region = info?.[1]?.[0]?.region?.value || 'לא ידוע';
   return `${esc(row.country?.value || code)}. אוכלוסייה לפי הנתון האחרון במאגר: ${row.value ? number(row.value) : 'אין נתון זמין'}. שנת הנתון: ${row.date || 'לא ידועה'}. אזור בעולם: ${esc(region)}.`;
 }
+
+async function earthquakes() {
+  const d = await json('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
+  const rows = (d.features || []).slice(0, 5);
+  if (!rows.length) return 'לא דווחו רעידות אדמה בעוצמה שתיים וחצי ומעלה ביממה האחרונה לפי המאגר.';
+  return 'רעידות האדמה הבולטות ביממה האחרונה. ' + rows.map((x, i) => {
+    const p = x.properties || {}, co = x.geometry?.coordinates || [];
+    const when = p.time ? new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Jerusalem' }).format(new Date(p.time)) : 'זמן לא ידוע';
+    return `אירוע ${i + 1}. עוצמה ${p.mag ?? 'לא ידועה'}. ${esc(p.place || 'מיקום לא ידוע')}. עומק ${co[2] ?? 'לא ידוע'} קילומטרים. שעה ${when}.`;
+  }).join(' ');
+}
+async function issPosition() {
+  const d = await json('https://api.wheretheiss.at/v1/satellites/25544');
+  return `תחנת החלל הבינלאומית נמצאת כעת בקו רוחב ${Number(d.latitude).toFixed(2)}, קו אורך ${Number(d.longitude).toFixed(2)}. גובה ${Math.round(d.altitude)} קילומטרים. מהירות ${Math.round(d.velocity)} קילומטרים בשעה. הנתונים מתעדכנים בזמן אמת בקירוב.`;
+}
+async function globalFlights() {
+  const d = await json('https://opensky-network.org/api/states/all');
+  const states = Array.isArray(d.states) ? d.states : [];
+  if (!states.length) return 'לא התקבלו כרגע נתוני מטוסים ממאגר המעקב העולמי.';
+  const airborne = states.filter(s => s && s[5] !== null && s[6] !== null && s[8] === false);
+  const sample = airborne.slice(0, 5).map((s, i) => {
+    const call = String(s[1] || '').trim() || 'מספר זיהוי לא זמין';
+    const country = s[2] || 'מדינה לא ידועה';
+    const alt = s[7] == null ? 'גובה לא ידוע' : Math.round(s[7]) + ' מטרים';
+    const speed = s[9] == null ? 'מהירות לא ידועה' : Math.round(s[9] * 3.6) + ' קילומטרים בשעה';
+    return `מטוס ${i + 1}. ${esc(call)}. מדינה: ${esc(country)}. גובה: ${alt}. מהירות: ${speed}.`;
+  });
+  return `במאגר התקבלו ${number(states.length)} כלי טיס ברחבי העולם, מתוכם ${number(airborne.length)} באוויר עם מיקום ידוע. ` + (sample.length ? sample.join(' ') : 'אין כרגע דוגמאות זמינות.');
+}
+async function worldPopulation() {
+  const d = await json('https://api.worldbank.org/v2/country/WLD/indicator/SP.POP.TOTL?format=json&per_page=1');
+  const row = d?.[1]?.[0];
+  if (!row || row.value == null) return 'נתון אוכלוסיית העולם אינו זמין כרגע במאגר.';
+  return `לפי הבנק העולמי, אוכלוסיית העולם בנתון האחרון שפורסם עמדה על כ${number(row.value)} בני אדם. שנת הנתון היא ${row.date}.`;
+}
+
 async function numberFact(n) {
   const d = await json('https://numbersapi.com/' + encodeURIComponent(n) + '/trivia?json');
   return d.text ? esc(d.text) : 'לא נמצאה עובדה על המספר הזה.';
@@ -74,6 +110,10 @@ export default async function handler(req, res) {
     if (choice === '3') return sendYemot(res, 'הקלידו קוד מדינה בן שתי אותיות באנגלית. לדוגמה איי אל לישראל, או יו אס לארצות הברית.', { inputName: 'CountryCode', min: 2, max: 2, timeout: '7' });
     if (choice === '4') return sendYemot(res, 'הקישו מספר שלם, עד תשע ספרות, לקבלת עובדה מעניינת.', { inputName: 'NumberInput', min: 1, max: 9, timeout: '7' });
     if (choice === '5') return sendYemot(res, 'אפשרות מעברי הלוויינים עדיין אינה מחוברת למנוע חישוב מסלולים, ולכן לא ניתן למסור זמני מעבר מדויקים.', { inputName: 'wm_nav', min: 1, max: 1, timeout: '7' });
+    if (choice === '6') return sendYemot(res, await earthquakes() + ' למידע מעודכן נוסף, הקישו 6.', { inputName: 'wm_nav', min: 1, max: 1, timeout: '7' });
+    if (choice === '7') return sendYemot(res, await issPosition() + ' להאזנה חוזרת, הקישו 7.', { inputName: 'wm_nav', min: 1, max: 1, timeout: '7' });
+    if (choice === '8') return sendYemot(res, await globalFlights() + ' להאזנה חוזרת, הקישו 8.', { inputName: 'wm_nav', min: 1, max: 1, timeout: '7' });
+    if (choice === '9') return sendYemot(res, await worldPopulation() + ' להאזנה חוזרת, הקישו 9.', { inputName: 'wm_nav', min: 1, max: 1, timeout: '7' });
     return sendYemot(res, 'הבחירה לא זוהתה. ' + menu(), { inputName: 'wm_nav', min: 1, max: 1, timeout: '3' });
   } catch (e) {
     return sendYemot(res, 'לא ניתן לקבל כרגע את הנתונים מהשירות החיצוני. אפשר לנסות שוב מאוחר יותר. ' + menu(), { inputName: 'wm_nav', min: 1, max: 1, timeout: '5' });
