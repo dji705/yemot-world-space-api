@@ -103,7 +103,14 @@ export default async function handler(req, res) {
       if (!/^-?\d{1,9}$/.test(num)) return sendYemot(res, 'המספר אינו תקין. הקישו מספר שלם עד תשע ספרות.', { inputName: 'NumberInput', min: 1, max: 9, timeout: '7' });
       return sendYemot(res, await numberFact(num) + ' לעובדה על מספר נוסף, הקישו מספר שלם.', { inputName: 'NumberInput', min: 1, max: 9, timeout: '7' });
     }
-    const choice = val(url, ['wm_nav', 'Choice', 'ApiPhoneInput', 'Digits', 'val']).replace(/[^0-9]/g, '');
+    // Yemot gateways may include an unrelated/stale input field before the
+    // actual menu digit. Prefer a recognized menu choice from any supported
+    // input field instead of letting the first non-empty field mask it.
+    const choiceFields = ['wm_nav', 'Choice', 'ApiPhoneInput', 'Digits', 'val', 'choice', 'menu'];
+    const rawChoices = choiceFields.flatMap(name => url.searchParams.getAll(name))
+      .map(value => String(value).replace(/[^0-9]/g, ''))
+      .filter(Boolean);
+    const choice = rawChoices.find(value => /^[1-9]$/.test(value)) || rawChoices[0] || '';
     if (!choice) return sendYemot(res, menu(), { inputName: 'wm_nav', min: 1, max: 1, timeout: '3' });
     if (choice === '1') return sendYemot(res, await launches() + ' להאזנה חוזרת, הקישו 1.', { inputName: 'wm_nav', min: 1, max: 1, timeout: '7' });
     if (choice === '2') return sendYemot(res, 'הקלידו את שם הלוויין באנגלית, או את מספרו הקטלוגי אם ידוע.', { inputName: 'SatelliteName', min: 2, max: 30, timeout: '7' });
